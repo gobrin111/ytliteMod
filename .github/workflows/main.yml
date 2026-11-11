@@ -1,14 +1,23 @@
-# Trimmed from upstream dayanch96/YTLite v5.2b4 .github/workflows/main.yml:
-# companion tweaks, Theos and the Safari extension are removed, so this only
-# injects the prebuilt YouTube Plus DEB into the base IPA.
+# Based on upstream dayanch96/YTLite v5.2b4 .github/workflows/main.yml, without the
+# companion tweaks and Safari extension. Builds our tweak from tweak/ (or downloads the
+# prebuilt YouTube Plus DEB) and injects it into the base IPA.
 name: Create YouTube Plus app
 
 on:
   workflow_dispatch:
     inputs:
 
+      tweak:
+        description: "source = build tweak/ from this repo, prebuilt = upstream YouTube Plus DEB"
+        default: "source"
+        required: true
+        type: choice
+        options:
+          - source
+          - prebuilt
+
       tweak_version:
-        description: "YouTube Plus version from dayanch96/YTLite/releases"
+        description: "Prebuilt only: YouTube Plus version from dayanch96/YTLite/releases"
         default: "5.2b4"
         required: true
         type: string
@@ -34,8 +43,16 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
+    env:
+      THEOS: ${{ github.workspace }}/theos
+      OUT_NAME: YouTube_${{ inputs.tweak == 'source' && 'YTMod' || format('Plus_{0}', inputs.tweak_version) }}_${{ github.run_number }}
 
     steps:
+      - name: Checkout Main
+        uses: actions/checkout@v4.1.1
+        with:
+          path: main
+
       # The base IPA lives in the draft release "base-ipa" so it never sits on a public host.
       - name: Download and validate IPA
         run: |
@@ -51,26 +68,66 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Install Dependencies
-        run: brew install ldid
+        run: brew install make ldid
+
+      - name: Set PATH environment variable
+        run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: Cache Theos
+        if: ${{ inputs.tweak == 'source' }}
+        id: theos
+        uses: actions/cache@v4
+        env:
+          cache-name: theos_cache_67db2ab
+        with:
+          path: theos/
+          key: ${{ env.cache-name }}
+          restore-keys: ${{ env.cache-name }}
+
+      - name: Setup Theos
+        if: ${{ inputs.tweak == 'source' && steps.theos.outputs.cache-hit != 'true' }}
+        uses: actions/checkout@v4.1.7
+        with:
+          repository: theos/theos
+          ref: 67db2ab8d950910161730de77c322658ea3e6b44
+          path: ${{ github.workspace }}/theos
+          submodules: recursive
+
+      - name: Download iOS SDK
+        if: ${{ inputs.tweak == 'source' && steps.theos.outputs.cache-hit != 'true' }}
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
+          cd sdks
+          git sparse-checkout set --no-cone iPhoneOS16.5.sdk
+          git checkout
+          mv *.sdk $THEOS/sdks
 
       - name: Install cyan
         run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
+      - name: Build tweak from source
+        if: ${{ inputs.tweak == 'source' }}
+        run: |
+          cd main/tweak
+          make clean package DEBUG=0 FINALPACKAGE=1
+          mv packages/*.deb ${{ github.workspace }}/tweak.deb
+
       - name: Download YouTube Plus
+        if: ${{ inputs.tweak == 'prebuilt' }}
         run: |
           deb_url="https://github.com/dayanch96/YTLite/releases/download/v${{ inputs.tweak_version }}/com.dvntm.ytlite_${{ inputs.tweak_version }}_iphoneos-arm.deb"
-          wget "$deb_url" --no-verbose -O ${{ github.workspace }}/ytplus.deb
+          wget "$deb_url" --no-verbose -O ${{ github.workspace }}/tweak.deb
 
       - name: Inject tweak into IPA
         run: |
-          cyan -i youtube.ipa -o YouTubePlus_${{ inputs.tweak_version }}.ipa -uwef ytplus.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }}
+          cyan -i youtube.ipa -o "$OUT_NAME.ipa" -uwef tweak.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }}
 
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2.0.1
         with:
           tag_name: ytp-${{ github.run_number }}
-          name: YouTubePlus v${{ inputs.tweak_version }} (${{ github.run_number }})
-          files: YouTubePlus_${{ inputs.tweak_version }}.ipa
+          name: ${{ env.OUT_NAME }}
+          files: ${{ env.OUT_NAME }}.ipa
           draft: true
 
       - name: Output Release URL

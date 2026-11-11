@@ -1,0 +1,9 @@
+Package: com.gobrin111.ytmod
+Name: YTMod
+Depends: mobilesubstrate
+Version: 0.1
+Architecture: iphoneos-arm
+Description: Minimal YouTube ad blocking, based on YTLite by dvntm
+Maintainer: gobrin111
+Author: gobrin111
+Section: Tweaks
