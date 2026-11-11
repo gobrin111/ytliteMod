@@ -1,62 +1,331 @@
-// Ad-blocking hooks ported from YTLite's YTLite.x (upstream/YTLite-v5.2b4, lines 17-70).
-// Every class and selector hooked or called here was found by name in YouTube 21.44.4.
-#import <Foundation/Foundation.h>
+// Ad blocking from YouTube-X by PoomSmart (MIT, see LICENSE.YouTube-X), unmodified copy of
+// https://github.com/PoomSmart/YouTube-X/blob/9a8e60a488325e37cf69e0611811889ab37cd3d3/Tweak.x
+#import <YouTubeHeader/_ASDisplayView.h>
+#import <YouTubeHeader/YTIElementRenderer.h>
+#import <YouTubeHeader/YTInnerTubeCollectionViewController.h>
+#import <YouTubeHeader/YTISectionListRenderer.h>
+#import <YouTubeHeader/YTIShelfRenderer.h>
+#import <YouTubeHeader/YTIWatchNextResponse.h>
+#import <YouTubeHeader/YTPlayerOverlay.h>
+#import <YouTubeHeader/YTPlayerOverlayProvider.h>
+#import <YouTubeHeader/YTReelModel.h>
+#import <YouTubeHeader/YTReelNonVideoContentModel.h>
+#import <HBLog.h>
 
-@interface YTIElementRendererCompatibilityOptions : NSObject
-@property (nonatomic, assign, readonly) BOOL hasAdLoggingData;
-@end
+%hook YTGlobalConfig
 
-@interface YTIElementRenderer : NSObject
-@property (nonatomic, assign, readonly) BOOL hasCompatibilityOptions;
-@property (nonatomic, strong, readonly) YTIElementRendererCompatibilityOptions *compatibilityOptions;
-@end
+- (BOOL)shouldBlockUpgradeDialog { return YES; }
 
-@interface YTIItemSectionSupportedRenderers : NSObject
-@property (nonatomic, assign, readonly) BOOL hasPromotedVideoRenderer;
-@property (nonatomic, assign, readonly) BOOL hasCompactPromotedVideoRenderer;
-@property (nonatomic, assign, readonly) BOOL hasPromotedVideoInlineMutedRenderer;
-@end
-
-@interface YTIItemSectionRenderer : NSObject
-@property (nonatomic, strong, readonly) NSMutableArray <YTIItemSectionSupportedRenderers *> *contentsArray;
-@end
-
-@interface YTISectionListSupportedRenderers : NSObject
-@property (nonatomic, strong, readonly) YTIItemSectionRenderer *itemSectionRenderer;
-@end
-
-@interface YTISectionListRenderer : NSObject
-@property (nonatomic, strong, readonly) NSMutableArray <YTISectionListSupportedRenderers *> *contentsArray;
-@end
+%end
 
 %hook YTIPlayerResponse
-- (BOOL)isMonetized { return NO; }
+
+%new(@@:)
+- (NSMutableArray *)playerAdsArray {
+    return [NSMutableArray array];
+}
+
+%new(@@:)
+- (NSMutableArray *)adSlotsArray {
+    return [NSMutableArray array];
+}
+
+%end
+
+%hook YTIPlayabilityStatus
+
+- (BOOL)isPlayableInBackground { return YES; }
+
+%end
+
+%hook YTIClientMdxGlobalConfig
+
+%new(B@:)
+- (BOOL)enableSkippableAd { return YES; }
+
+%end
+
+%hook YTHotConfig
+
+- (BOOL)clientInfraClientConfigIosEnableFillingEncodedHacksInnertubeContext { return NO; }
+
+%end
+
+%hook MLVideo
+
+- (BOOL)playableInBackground { return YES; }
+
+%end
+
+%hook YTIBackgroundOfflineSettingCategoryEntryRenderer
+
+%new(B@:)
+- (BOOL)isBackgroundEnabled { return YES; }
+
+%end
+
+%hook YTAdShieldUtils
+
++ (id)spamSignalsDictionary { return @{}; }
++ (id)spamSignalsDictionaryWithoutIDFA { return @{}; }
+
 %end
 
 %hook YTDataUtils
-+ (id)spamSignalsDictionary { return nil; }
-+ (id)spamSignalsDictionaryWithoutIDFA { return nil; }
+
++ (id)spamSignalsDictionary { return @{ @"ms": @"" }; }
++ (id)spamSignalsDictionaryWithoutIDFA { return @{}; }
+
 %end
 
-// Upstream also skipped -decorateContext: on the two ads context decorators. That selector
-// is gone in 21.44.4 (there is a decorateContext:serviceType: instead), so it is left out
-// until its real signature is known.
+%hook YTLocalPlaybackController
 
-%hook YTIElementRenderer
-- (NSData *)elementData {
-    if (self.hasCompatibilityOptions && self.compatibilityOptions.hasAdLoggingData) return nil;
-    return %orig;
+- (id)createAdsPlaybackCoordinator { return nil; }
+
+%end
+
+%hook MDXSession
+
+- (void)adPlaying:(id)ad {}
+
+%end
+
+%hook MDXSessionImpl
+
+- (void)adPlaying:(id)ad {}
+
+%end
+
+static BOOL isAdsReelContentModel(YTReelContentModel *model) {
+    if ([model respondsToSelector:@selector(videoType)])
+        return ((YTReelModel *)model).videoType == 3;
+    if ([model isKindOfClass:%c(YTReelNonVideoContentModel)])
+        return [[[(YTReelNonVideoContentModel *)model renderer].customData description] containsString:@"YTIReelNonVideoAdsCustomData_reelNonVideoAdsCustomData"];
+    return NO;
 }
+
+%hook YTReelDataSource
+
+- (YTReelContentModel *)makeContentModelForEntry:(id)entry {
+    YTReelContentModel *model = %orig;
+    if (isAdsReelContentModel(model))
+        return nil;
+    return model;
+}
+
 %end
 
-%hook YTSectionListViewController
-- (void)loadWithModel:(YTISectionListRenderer *)model {
-    NSMutableArray <YTISectionListSupportedRenderers *> *contentsArray = model.contentsArray;
-    NSIndexSet *removeIndexes = [contentsArray indexesOfObjectsPassingTest:^BOOL(YTISectionListSupportedRenderers *renderers, NSUInteger idx, BOOL *stop) {
-        YTIItemSectionSupportedRenderers *firstObject = [renderers.itemSectionRenderer.contentsArray firstObject];
-        return firstObject.hasPromotedVideoRenderer || firstObject.hasCompactPromotedVideoRenderer || firstObject.hasPromotedVideoInlineMutedRenderer;
-    }];
-    [contentsArray removeObjectsAtIndexes:removeIndexes];
+// For newer YouTube versions
+%hook YTReelContentModel
+
++ (YTReelContentModel *)makeContentModelForEntry:(id)entry {
+    YTReelContentModel *model = %orig;
+    if (isAdsReelContentModel(model))
+        return nil;
+    return model;
+}
+
+%end
+
+%hook YTReelInfinitePlaybackDataSource
+
+- (YTReelContentModel *)makeContentModelForEntry:(id)entry {
+    YTReelContentModel *model = %orig;
+    if (isAdsReelContentModel(model))
+        return nil;
+    return model;
+}
+
+- (void)setReels:(NSMutableOrderedSet <YTReelContentModel *> *)reels {
+    [reels removeObjectsAtIndexes:[reels indexesOfObjectsPassingTest:^BOOL(YTReelContentModel *obj, NSUInteger idx, BOOL *stop) {
+        return isAdsReelContentModel(obj);
+    }]];
     %orig;
 }
+
+%end
+
+static BOOL isProductList(YTICommand *command) {
+    if ([command respondsToSelector:@selector(yt_showEngagementPanelEndpoint)]) {
+        YTIShowEngagementPanelEndpoint *endpoint = [command yt_showEngagementPanelEndpoint];
+        return [endpoint.identifier.tag isEqualToString:@"PAproduct_list"];
+    }
+    return NO;
+}
+
+%hook YTWatchNextResponseViewController
+
+- (void)loadWithModel:(YTIWatchNextResponse *)model {
+    YTICommand *onUiReady = model.onUiReady;
+    if ([onUiReady respondsToSelector:@selector(yt_commandExecutorCommand)]) {
+        YTICommandExecutorCommand *commandExecutorCommand = [onUiReady yt_commandExecutorCommand];
+        NSMutableArray <YTICommand *> *commandsArray = commandExecutorCommand.commandsArray;
+        [commandsArray removeObjectsAtIndexes:[commandsArray indexesOfObjectsPassingTest:^BOOL(YTICommand *command, NSUInteger idx, BOOL *stop) {
+            return isProductList(command);
+        }]];
+    }
+    if (isProductList(onUiReady))
+        model.onUiReady = nil;
+    %orig;
+}
+
+%end
+
+%hook YTMainAppVideoPlayerOverlayViewController
+
+- (void)playerOverlayProvider:(YTPlayerOverlayProvider *)provider didInsertPlayerOverlay:(YTPlayerOverlay *)overlay {
+    if ([[overlay overlayIdentifier] isEqualToString:@"player_overlay_product_in_video"]) return;
+    %orig;
+}
+%end
+
+NSString *getAdString(NSString *description) {
+    for (NSString *str in @[
+        @"brand_promo",
+        @"brand_video_shelf",
+        @"carousel_footered_layout",
+        @"carousel_headered_layout",
+        @"eml.expandable_metadata",
+        @"feed_ad_metadata",
+        @"full_width_portrait_image_layout",
+        @"full_width_square_image_layout",
+        @"grid_ads_image_layout",
+        @"landscape_image_wide_button_layout",
+        @"post_shelf",
+        @"product_carousel",
+        @"product_engagement_panel",
+        @"product_item",
+        @"shopping_carousel",
+        @"shopping_item_card_list",
+        @"statement_banner",
+        @"square_image_layout",
+        @"text_image_button_layout",
+        @"text_search_ad",
+        @"video_display_full_layout",
+        @"video_display_full_buttoned_layout"
+    ])
+        if ([description containsString:str]) return str;
+
+    return nil;
+}
+
+static BOOL isAdRenderer(YTIElementRenderer *elementRenderer, int kind) {
+    if ([elementRenderer respondsToSelector:@selector(hasCompatibilityOptions)] && elementRenderer.hasCompatibilityOptions && elementRenderer.compatibilityOptions.hasAdLoggingData) {
+        HBLogDebug(@"YTX adLogging %d %@", kind, elementRenderer);
+        return YES;
+    }
+    NSString *description = [elementRenderer description];
+    NSString *adString = getAdString(description);
+    if (adString) {
+        HBLogDebug(@"YTX getAdString %d %@ %@", kind, adString, elementRenderer);
+        return YES;
+    }
+    return NO;
+}
+
+static NSMutableArray <YTIItemSectionRenderer *> *filteredArray(NSArray <YTIItemSectionRenderer *> *array) {
+    NSMutableArray <YTIItemSectionRenderer *> *newArray = [array mutableCopy];
+    NSIndexSet *removeIndexes = [newArray indexesOfObjectsPassingTest:^BOOL(YTIItemSectionRenderer *sectionRenderer, NSUInteger idx, BOOL *stop) {
+        if ([sectionRenderer isKindOfClass:%c(YTIShelfRenderer)]) {
+            YTIShelfSupportedRenderers *content = ((YTIShelfRenderer *)sectionRenderer).content;
+            YTIHorizontalListRenderer *horizontalListRenderer = content.horizontalListRenderer;
+            NSMutableArray <YTIHorizontalListSupportedRenderers *> *itemsArray = horizontalListRenderer.itemsArray;
+            NSIndexSet *removeItemsArrayIndexes = [itemsArray indexesOfObjectsPassingTest:^BOOL(YTIHorizontalListSupportedRenderers *horizontalListSupportedRenderers, NSUInteger idx2, BOOL *stop2) {
+                YTIElementRenderer *elementRenderer = horizontalListSupportedRenderers.elementRenderer;
+                return isAdRenderer(elementRenderer, 4);
+            }];
+            [itemsArray removeObjectsAtIndexes:removeItemsArrayIndexes];
+        }
+        if (![sectionRenderer isKindOfClass:%c(YTIItemSectionRenderer)])
+            return NO;
+        NSMutableArray <YTIItemSectionSupportedRenderers *> *contentsArray = sectionRenderer.contentsArray;
+        if (contentsArray.count > 1) {
+            NSIndexSet *removeContentsArrayIndexes = [contentsArray indexesOfObjectsPassingTest:^BOOL(YTIItemSectionSupportedRenderers *sectionSupportedRenderers, NSUInteger idx2, BOOL *stop2) {
+                YTIElementRenderer *elementRenderer = sectionSupportedRenderers.elementRenderer;
+                return isAdRenderer(elementRenderer, 3);
+            }];
+            [contentsArray removeObjectsAtIndexes:removeContentsArrayIndexes];
+        }
+        YTIItemSectionSupportedRenderers *firstObject = [contentsArray firstObject];
+        YTIElementRenderer *elementRenderer = firstObject.elementRenderer;
+        return isAdRenderer(elementRenderer, 2);
+    }];
+    [newArray removeObjectsAtIndexes:removeIndexes];
+    return newArray;
+}
+
+static BOOL isAdSectionEntry(id entry) {
+    if ([entry isKindOfClass:%c(YTIItemSectionSupportedRenderers)])
+        return isAdRenderer(((YTIItemSectionSupportedRenderers *)entry).elementRenderer, 5);
+    if ([entry isKindOfClass:%c(YTIElementRenderer)])
+        return isAdRenderer(entry, 5);
+    return NO;
+}
+
+static NSArray *filteredSectionEntries(NSArray *entries) {
+    NSIndexSet *adIndexes = [entries indexesOfObjectsPassingTest:^BOOL(id entry, NSUInteger index, BOOL *stop) {
+        return isAdSectionEntry(entry);
+    }];
+    if (!adIndexes.count) return entries;
+    NSMutableArray *filteredEntries = [entries mutableCopy];
+    [filteredEntries removeObjectsAtIndexes:adIndexes];
+    return filteredEntries;
+}
+
+%hook YTArraySectionViewModel
+
+- (id)initWithEntries:(NSArray *)entries {
+    return %orig(filteredSectionEntries(entries));
+}
+
+- (id)initWithTransform:(id)transform entries:(NSArray *)entries {
+    return %orig(transform, filteredSectionEntries(entries));
+}
+
+- (void)insertEntries:(NSArray *)entries atIndex:(NSUInteger)index {
+    NSArray *filteredEntries = filteredSectionEntries(entries);
+    if (filteredEntries.count)
+        %orig(filteredEntries, index);
+}
+
+- (void)replaceEntry:(id)oldEntry withEntry:(id)newEntry {
+    if (isAdSectionEntry(newEntry)) return;
+    %orig;
+}
+
+%end
+
+// Inline feed ads are inserted through externally managed ad slots after the
+// section renderers have been filtered. Reject these slots before they bind a
+// YTAdVideoElementsCellController to the collection view.
+%hook YTAdElementsCellExternallyManagedSlotAdapterImpl
+
+- (BOOL)isValidSlotType:(int)type {
+    return NO;
+}
+
+%end
+
+%hook _ASDisplayView
+
+- (void)didMoveToWindow {
+    %orig;
+    if (([self.accessibilityIdentifier isEqualToString:@"eml.expandable_metadata.vpp"]))
+        [self removeFromSuperview];
+}
+
+%end
+
+%hook YTInnerTubeCollectionViewController
+
+- (void)displaySectionsWithReloadingSectionControllerByRenderer:(id)renderer {
+    NSMutableArray *sectionRenderers = [self valueForKey:@"_sectionRenderers"];
+    [self setValue:filteredArray(sectionRenderers) forKey:@"_sectionRenderers"];
+    %orig;
+}
+
+- (void)addSectionsFromArray:(NSArray <YTIItemSectionRenderer *> *)array {
+    %orig(filteredArray(array));
+}
+
 %end

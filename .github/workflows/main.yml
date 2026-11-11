@@ -8,13 +8,14 @@ on:
     inputs:
 
       tweak:
-        description: "source = build tweak/ from this repo, prebuilt = upstream YouTube Plus DEB"
+        description: "source = build tweak/ from this repo, prebuilt = upstream YouTube Plus DEB, none = stock app for comparison"
         default: "source"
         required: true
         type: choice
         options:
           - source
           - prebuilt
+          - none
 
       tweak_version:
         description: "Prebuilt only: YouTube Plus version from dayanch96/YTLite/releases"
@@ -45,7 +46,7 @@ jobs:
       contents: write
     env:
       THEOS: ${{ github.workspace }}/theos
-      OUT_NAME: YouTube_${{ inputs.tweak == 'source' && 'YTMod' || format('Plus_{0}', inputs.tweak_version) }}_${{ github.run_number }}
+      OUT_NAME: YouTube_${{ inputs.tweak == 'source' && 'YTMod' || inputs.tweak == 'none' && 'Stock' || format('Plus_{0}', inputs.tweak_version) }}_${{ github.run_number }}
 
     steps:
       - name: Checkout Main
@@ -102,6 +103,19 @@ jobs:
           git checkout
           mv *.sdk $THEOS/sdks
 
+      # Headers for YouTube's private classes, used by tweak/Tweak.x.
+      - name: Clone YouTubeHeader and PSHeader
+        if: ${{ inputs.tweak == 'source' }}
+        run: |
+          cd $THEOS/include
+          for repo in YouTubeHeader PSHeader; do
+            if [ -d "$repo" ]; then
+              git -C "$repo" pull --quiet
+            else
+              git clone --quiet --depth=1 "https://github.com/PoomSmart/$repo.git"
+            fi
+          done
+
       - name: Install cyan
         run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
@@ -120,7 +134,10 @@ jobs:
 
       - name: Inject tweak into IPA
         run: |
-          cyan -i youtube.ipa -o "$OUT_NAME.ipa" -uwef tweak.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }}
+          # -u -w -e strip UISupportedDevices, the watch app and app extensions; -f lists files to inject.
+          inject=""
+          if [ -f tweak.deb ]; then inject="-f tweak.deb"; fi
+          cyan -i youtube.ipa -o "$OUT_NAME.ipa" -uwe $inject -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }}
 
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2.0.1
