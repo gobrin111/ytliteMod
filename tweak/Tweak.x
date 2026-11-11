@@ -1,4 +1,6 @@
-// Ad blocking from YouTube-X by PoomSmart (MIT, see LICENSE.YouTube-X), unmodified copy of
+// Ad blocking from YouTube-X by PoomSmart (MIT, see LICENSE.YouTube-X), copied from the
+// commit below. One change: the three background-playback hooks (YTIPlayabilityStatus,
+// MLVideo, YTIBackgroundOfflineSettingCategoryEntryRenderer) are removed.
 // https://github.com/PoomSmart/YouTube-X/blob/9a8e60a488325e37cf69e0611811889ab37cd3d3/Tweak.x
 #import <YouTubeHeader/_ASDisplayView.h>
 #import <YouTubeHeader/YTIElementRenderer.h>
@@ -32,12 +34,6 @@
 
 %end
 
-%hook YTIPlayabilityStatus
-
-- (BOOL)isPlayableInBackground { return YES; }
-
-%end
-
 %hook YTIClientMdxGlobalConfig
 
 %new(B@:)
@@ -48,19 +44,6 @@
 %hook YTHotConfig
 
 - (BOOL)clientInfraClientConfigIosEnableFillingEncodedHacksInnertubeContext { return NO; }
-
-%end
-
-%hook MLVideo
-
-- (BOOL)playableInBackground { return YES; }
-
-%end
-
-%hook YTIBackgroundOfflineSettingCategoryEntryRenderer
-
-%new(B@:)
-- (BOOL)isBackgroundEnabled { return YES; }
 
 %end
 
