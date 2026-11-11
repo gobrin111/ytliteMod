@@ -1,17 +1,11 @@
 # Trimmed from upstream dayanch96/YTLite v5.2b4 .github/workflows/main.yml:
 # companion tweaks, Theos and the Safari extension are removed, so this only
-# injects the prebuilt YouTube Plus DEB into a supplied IPA.
+# injects the prebuilt YouTube Plus DEB into the base IPA.
 name: Create YouTube Plus app
 
 on:
   workflow_dispatch:
     inputs:
-
-      ipa_url:
-        description: "URL to the decrypted IPA file"
-        default: ""
-        required: true
-        type: string
 
       tweak_version:
         description: "YouTube Plus version from dayanch96/YTLite/releases"
@@ -42,14 +36,10 @@ jobs:
       contents: write
 
     steps:
-      - name: Hide sensitive inputs
-        uses: levibostian/action-hide-sensitive-inputs@v1
-        with:
-          exclude_inputs: bundle_id,display_name,tweak_version
-
+      # The base IPA lives in the draft release "base-ipa" so it never sits on a public host.
       - name: Download and validate IPA
         run: |
-          wget "${{ inputs.ipa_url }}" --no-verbose -O ${{ github.workspace }}/youtube.ipa
+          gh release download base-ipa --repo ${{ github.repository }} --pattern '*.ipa' --output ${{ github.workspace }}/youtube.ipa
 
           file_type=$(file --mime-type -b ${{ github.workspace }}/youtube.ipa)
 
@@ -57,6 +47,8 @@ jobs:
             echo "::error::Validation failed: The downloaded file is not a valid IPA. Detected type: $file_type."
             exit 1
           fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Install Dependencies
         run: brew install ldid
